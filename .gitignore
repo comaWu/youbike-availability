@@ -1,5 +1,20 @@
-# youbike-availability/.gitignore
-.env
+# Python
 __pycache__/
-*.pyc
-data/rowdata/*
+*.py[cod]
+.venv/
+.env
+
+# Node/React
+node_modules/
+dist/
+build/
+
+# Data & Models
+data/
+analysis/data/
+analysis/models/
+*.csv
+*.parquet
+
+# VS Code
+.vscode/
