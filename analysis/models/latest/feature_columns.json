@@ -1,0 +1,12 @@
+[
+  "hour",
+  "dow",
+  "is_weekend",
+  "tot",
+  "lag_1",
+  "lag_2",
+  "ma_2",
+  "ma_3",
+  "city",
+  "sno"
+]

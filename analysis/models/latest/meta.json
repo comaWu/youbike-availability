@@ -1,0 +1,9 @@
+{
+  "model": "GradientBoostingRegressor",
+  "mae_test": 0.7520187660926506,
+  "n_train": 362981,
+  "n_test": 90746,
+  "horizon_min": 1,
+  "city": "TPE",
+  "sno": null
+}

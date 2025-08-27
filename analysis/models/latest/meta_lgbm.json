@@ -1,0 +1,24 @@
+{
+  "model": "LightGBM",
+  "mae_test": 0.6863722961643988,
+  "r2_test": 0.9709462687378075,
+  "n_train": 376101,
+  "n_test": 94026,
+  "horizon_min": 1,
+  "city": "TPE",
+  "sno": null,
+  "cat_features": [
+    "city",
+    "sno"
+  ],
+  "params": {
+    "n_estimators": 800,
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "min_data_in_leaf": 20,
+    "subsample": 0.9,
+    "subsample_freq": 1,
+    "colsample_bytree": 0.9,
+    "random_state": 42
+  }
+}
