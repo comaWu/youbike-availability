@@ -9,22 +9,7 @@
 - 📊 **報表**：`check_pipeline.py` 自動輸出完整報告與圖表
 - 🗺 **前端**：React + Leaflet，地圖視覺化顯示預測結果
 
-## 專案架構
-youbike-availability/
-├── analysis/
-│ ├── src/
-│ │ ├── features.py # 特徵工程
-│ │ ├── train_ml_lgbm.py # 模型訓練 (LightGBM + EarlyStopping)
-│ │ ├── evaluate.py # 模型評估 (出圖)
-│ │ ├── check_pipeline.py # 一鍵報告 (含圖表)
-│ └── models/
-│ └── latest/ # 輸出: pkl/json/csv/png
-├── data/
-│ └── rowdata/ # 原始抓取資料 (可忽略, DB為主)
-├── frontend/ # React + Leaflet
-├── .env # DB & API 設定
-├── .gitignore
-└── README.md
+
 
 
 ## 🔄 專案流程
