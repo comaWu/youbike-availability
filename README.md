@@ -1,177 +1,73 @@
-\# 🚲 YouBike Availability AI Prediction
+# YouBike Availability Prediction 🚲
 
+這是一個 **台北/新北 YouBike 站點即時可借數量預測系統**，包含資料抓取、特徵工程、機器學習訓練與前端地圖展示。
 
+## 功能特色
+- ⏱ **爬蟲**：每 5 分鐘抓取 YouBike API，存入 PostgreSQL
+- 🗂 **資料處理**：逐站補齊分鐘數據，生成時間特徵、滯後特徵、移動平均
+- 🤖 **模型**：使用 LightGBM，MAE < 0.2，R² > 0.95
+- 📊 **報表**：`check_pipeline.py` 自動輸出完整報告與圖表
+- 🗺 **前端**：React + Leaflet，地圖視覺化顯示預測結果
 
-> 利用 AI/ML 預測 YouBike 站點未來幾分鐘的可借數，並結合 React + Leaflet 做互動地圖展示。
+## 專案架構
+youbike-availability/
+├── analysis/
+│ ├── src/
+│ │ ├── features.py # 特徵工程
+│ │ ├── train_ml_lgbm.py # 模型訓練 (LightGBM + EarlyStopping)
+│ │ ├── evaluate.py # 模型評估 (出圖)
+│ │ ├── check_pipeline.py # 一鍵報告 (含圖表)
+│ └── models/
+│ └── latest/ # 輸出: pkl/json/csv/png
+├── data/
+│ └── rowdata/ # 原始抓取資料 (可忽略, DB為主)
+├── frontend/ # React + Leaflet
+├── .env # DB & API 設定
+├── .gitignore
+└── README.md
 
 
+## 🔄 專案流程
 
----
+1. **資料蒐集**
 
+  - crawler.py 每 5 分鐘呼叫 YouBike API，存進 PostgreSQL (station\_records)。
 
+2. **特徵工程** (features.py)
 
-\## ✨ 專案特色
+  - 加入 lag (lag\_1, lag\_5, ...)、移動平均 (ma\_3, ma\_5, ma\_10)、時間特徵。
 
+3. **模型訓練**
 
+  - train\_baseline.py → 移動平均基準
 
-\- \*\*即時資料蒐集\*\*：定時從 YouBike 官方 API 抓取站點狀態。
+  - train\_ml.py → GradientBoosting
 
-\- \*\*時序資料庫\*\*：PostgreSQL 儲存完整時序資料。
+  - train\_ml\_lgbm.py → LightGBM
 
-\- \*\*特徵工程\*\*：lag、移動平均、時間特徵（hour, dow, weekend）。
+4. **模型評估** (evaluate.py)
 
-\- \*\*AI 預測模型\*\*：
+  - 輸出 MAE、R²
 
-&nbsp; - Baseline：移動平均
+  - 比較真實值 vs 預測值
 
-&nbsp; - GradientBoosting (scikit-learn)
+5. **即時預測** (predict\_once.py)
 
-&nbsp; - LightGBM（支援 categorical features: city, sno）
+  - 查 DB 最新狀態 → 載入模型 → 預測未來 X 分鐘可借數 & 機率
 
-\- \*\*地圖前端\*\*：
 
-&nbsp; - React + Leaflet
+# 訓練（含 early stopping）
+python -m analysis.src.train_ml_lgbm
 
-&nbsp; - 彩色 marker 顯示可租機率
-
-&nbsp; - Popup 顯示可借/預測數
-
-&nbsp; - Legend（圖例）+ 比例尺
-
-&nbsp; - 使用者輸入地址或地圖點擊起/終點 → 自動規劃路線（步行/自行車/汽車）
-
-\- \*\*部署\*\*：
-
-&nbsp; - GitHub 管理版本
-
-&nbsp; - Vercel 部署前端
-
-&nbsp; - 後端 API 可用 Render / Railway / 自架伺服器
-
-
-
----
-
-
-
-\## 🏗️ 專案架構
-
-
-
-
-
----
-
-
-
-\## 🔄 專案流程
-
-
-
-1\. \*\*資料蒐集\*\*  
-
-&nbsp;  - `crawler.py` 每 5 分鐘呼叫 YouBike API，存進 PostgreSQL (`station\_records`)。
-
-
-
-2\. \*\*特徵工程\*\* (`features.py`)  
-
-&nbsp;  - 加入 lag (`lag\_1, lag\_5, ...`)、移動平均 (`ma\_3, ma\_5, ma\_10`)、時間特徵。
-
-
-
-3\. \*\*模型訓練\*\*  
-
-&nbsp;  - `train\_baseline.py` → 移動平均基準
-
-&nbsp;  - `train\_ml.py` → GradientBoosting
-
-&nbsp;  - `train\_ml\_lgbm.py` → LightGBM
-
-
-
-4\. \*\*模型評估\*\* (`evaluate.py`)  
-
-&nbsp;  - 輸出 MAE、R²
-
-&nbsp;  - 比較真實值 vs 預測值
-
-
-
-5\. \*\*即時預測\*\* (`predict\_once.py`)  
-
-&nbsp;  - 查 DB 最新狀態 → 載入模型 → 預測未來 X 分鐘可借數 \& 機率
-
-
-
-6\. \*\*前端展示\*\* (`web/`)  
-
-&nbsp;  - Leaflet 地圖顯示站點可借狀態與預測
-
-&nbsp;  - Legend（右上角圖例）、比例尺
-
-&nbsp;  - 起/終點輸入 \& 點擊 → 規劃路徑
-
-
-
----
-
-
-
-\## ⚙️ 安裝與使用
-
-
-
-\### 1. 後端 (資料蒐集 + 訓練)
-
-
-
-```bash
-
-\# 建立虛擬環境或用 docker
-
-pip install -r requirements.txt
-
-
-
-\# 抓取資料
-
-python -m analysis.src.crawler
-
-
-
-\# 特徵檢查
-
-python -m analysis.src.check\_features --city NTP --sno 500202005 --days 1 --horizon 5
-
-
-
-\# 訓練基線模型
-
-python -m analysis.src.train\_baseline
-
-
-
-\# 訓練 ML 模型
-
-python -m analysis.src.train\_ml\_lgbm
-
-
-
-\# 評估
-
+# 評估
 python -m analysis.src.evaluate
 
+# 單次預測
+python -m analysis.src.predict_once
 
-
-cd web
-
-npm install
-
-npm run dev   # 本地開發
-
-npm run build # 打包
-
+python -m analysis.src.check_pipeline --mode brief --days 3 --horizon 5
+python -m analysis.src.check_pipeline --mode brief --days 3 --horizon 5
+python -m analysis.src.check_pipeline
 
 
 

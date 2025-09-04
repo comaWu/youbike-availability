@@ -1,20 +1,38 @@
 # Python
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Virtual env
 .venv/
+env/
+venv/
+
+# VSCode
+.vscode/
+
+# Env config
 .env
 
-# Node/React
-node_modules/
-dist/
-build/
+# DB raw data
+data/rowdata/
 
-# Data & Models
-data/
-analysis/data/
-analysis/models/
+# Models and outputs
+analysis/models/latest/*
+!analysis/models/.gitkeep
+
+# Reports & images
 *.csv
-*.parquet
+*.png
+*.pdf
 
-# VS Code
-.vscode/
+# Node modules
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+
+# System files
+.DS_Store
+Thumbs.db

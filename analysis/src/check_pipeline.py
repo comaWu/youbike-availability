@@ -8,12 +8,19 @@ from .features import build_features
 from .train_ml_lgbm import run as lgbm_train_run
 from .predict_once import predict_once
 import joblib
+import matplotlib.pyplot as plt
 
-OUT_DIR = Path(__file__).resolve().parents[1] / "models" / "latest"
-MD_REPORT = OUT_DIR / "pipeline_report.md"
-EVAL_JSON = OUT_DIR / "eval_summary.json"
-FI_CSV    = OUT_DIR / "feature_importances.csv"
-PREVIEW_CSV = OUT_DIR / "feature_preview.csv"
+OUT_DIR      = Path(__file__).resolve().parents[1] / "models" / "latest"
+MD_REPORT    = OUT_DIR / "pipeline_report.md"
+EVAL_JSON    = OUT_DIR / "eval_summary.json"
+FI_CSV       = OUT_DIR / "feature_importances.csv"
+PREVIEW_CSV  = OUT_DIR / "feature_preview.csv"
+FI_PNG       = OUT_DIR / "fi_top15.png"
+MAE_PNG      = OUT_DIR / "metrics_mae.png"  
+R2_PNG       = OUT_DIR / "metrics_r2.png"
+SCATTER_PNG  = OUT_DIR / "true_vs_pred.png"
+TEST_CSV     = OUT_DIR / "test_predictions.csv"
+
 
 def tnow(): return time.perf_counter()
 
@@ -85,7 +92,6 @@ def stage_train_lgbm(city, sno, days, horizon, mode):
 
 def stage_evaluate(city, sno, days, horizon, mode, head_n):
     header("Stage 3: EVALUATE")
-    # build features again to keep split coherent with latest
     df = build_features(city=city, sno=sno, days=days, horizon=horizon)
     if df.empty:
         print("⚠️ 無法評估：特徵集為空")
@@ -121,13 +127,12 @@ def stage_evaluate(city, sno, days, horizon, mode, head_n):
     print(f"[Train] MAE={mae_tr:.4f}  R2={r2_tr:.4f}   n={len(y_tr)}")
     print(f"[Test ] MAE={mae_te:.4f}  R2={r2_te:.4f}   n={len(y_te)}")
 
-    if mode in ("normal", "verbose"):
-        cmp = pd.DataFrame({"y_true": y_te.reset_index(drop=True),
-                            "y_pred": pd.Series(yhat_te).round(3)})
-        print("\n[Test head]")
-        print(cmp.head(head_n).to_string(index=False))
-    else:
-        cmp = None
+    # === 新增：保存測試集對照，方便畫散點 ===
+    compare = pd.DataFrame({
+        "y_true": y_te.reset_index(drop=True),
+        "y_pred": pd.Series(yhat_te)
+    })
+    compare.to_csv(TEST_CSV, index=False)
 
     summary = {"mae_train": mae_tr, "r2_train": r2_tr,
                "mae_test": mae_te, "r2_test": r2_te,
@@ -135,14 +140,70 @@ def stage_evaluate(city, sno, days, horizon, mode, head_n):
     Path(EVAL_JSON).write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     return summary
 
+
 def stage_predict_once(city, sno, horizon, days):
     header("Stage 4: PREDICT ONCE")
     res = predict_once(city=city, sno=sno, horizon=horizon, days=days)
     print(res)
     return res
 
+def make_charts():
+    """產出四張圖：特徵重要性/MAE/R2/散點"""
+    # 1) Feature Importance（Top 15）
+    if (OUT_DIR / "feature_importances.csv").exists():
+        fi = pd.read_csv(OUT_DIR / "feature_importances.csv")
+        fi = fi.sort_values("importance", ascending=False).head(15)
+        plt.figure(figsize=(8,6))
+        plt.barh(fi["feature"], fi["importance"])
+        plt.gca().invert_yaxis()
+        plt.title("Feature Importance (Top 15)")
+        plt.xlabel("Importance")
+        plt.tight_layout()
+        plt.savefig(FI_PNG)
+        plt.close()
+
+    # 2) MAE（Train vs Test）
+    if Path(EVAL_JSON).exists():
+        eval_data = json.loads(Path(EVAL_JSON).read_text())
+        plt.figure(figsize=(4,4))
+        plt.bar(["Train","Test"], [eval_data["mae_train"], eval_data["mae_test"]])
+        plt.title("MAE")
+        plt.ylabel("Error (bikes)")
+        plt.tight_layout()
+        plt.savefig(MAE_PNG)
+        plt.close()
+
+        # 3) R2（Train vs Test）
+        plt.figure(figsize=(4,4))
+        plt.bar(["Train","Test"], [eval_data["r2_train"], eval_data["r2_test"]])
+        plt.title("R²")
+        plt.ylim(0, 1)
+        plt.tight_layout()
+        plt.savefig(R2_PNG)
+        plt.close()
+
+    # 4) 真實 vs 預測 散點（Test 前 1000 筆）
+    if TEST_CSV.exists():
+        cmp = pd.read_csv(TEST_CSV)
+        head_n = min(1000, len(cmp))
+        plt.figure(figsize=(5,5))
+        plt.scatter(cmp["y_true"].head(head_n), cmp["y_pred"].head(head_n), alpha=0.5)
+        m = max(cmp["y_true"].max(), cmp["y_pred"].max())
+        plt.plot([0,m],[0,m],"--")
+        plt.xlabel("True (test)")
+        plt.ylabel("Predicted")
+        plt.title("True vs Predicted (Test)")
+        plt.tight_layout()
+        plt.savefig(SCATTER_PNG)
+        plt.close()
+
+
 def write_markdown(city, sno, days, horizon, bf_info, tr_info, eval_info, pred_info):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 先產圖
+    make_charts()
+
     md = []
     md.append(f"# YouBike Pipeline Report\n")
     md.append(f"- city: **{city}**  sno: **{sno}**  days: **{days}**  horizon: **{horizon}m**\n")
@@ -157,17 +218,39 @@ def write_markdown(city, sno, days, horizon, bf_info, tr_info, eval_info, pred_i
         for r in tr_info["fi_top"]:
             md.append(f"| {r['feature']} | {r['importance']} |")
         md.append("")
+    # 插圖：Feature Importance
+    if FI_PNG.exists():
+        md.append(f"![Feature Importance]({FI_PNG.name})\n")
+
     md.append(f"## Evaluate\n")
     if eval_info:
         md.append(f"- Train: MAE={eval_info['mae_train']:.4f}, R2={eval_info['r2_train']:.4f}, n={eval_info['n_train']}")
-        md.append(f"- Test : MAE={eval_info['mae_test']:.4f}, R2={eval_info['r2_test']:.4f}, n={eval_info['n_test']}")
-        md.append(f"- JSON：`eval_summary.json`\n")
+        md.append(f"- Test : MAE={eval_info['mae_test']:.4f}, R2={eval_info['r2_test']:.4f}, n={eval_info['n_test']}\n")
+        # 插圖：MAE / R2
+        if MAE_PNG.exists():
+            md.append(f"![MAE]({MAE_PNG.name})")
+        if R2_PNG.exists():
+            md.append(f"![R2]({R2_PNG.name})")
+        # 測試集對照（只放前 5 行）
+        if TEST_CSV.exists():
+            md.append("\n**Test predictions (head)**")
+            try:
+                head5 = pd.read_csv(TEST_CSV).head(5)
+                md.append("\n\n" + head5.to_markdown(index=False) + "\n")
+            except Exception:
+                md.append(f"\n（見 `{TEST_CSV.name}`）\n")
+        # 插圖：散點
+        if SCATTER_PNG.exists():
+            md.append(f"![True vs Predicted]({SCATTER_PNG.name})")
     else:
         md.append("- （無法評估）\n")
+
     md.append(f"## Predict Once\n")
     md.append(f"```json\n{json.dumps(pred_info, indent=2, ensure_ascii=False)}\n```")
     MD_REPORT.write_text("\n".join(md), encoding="utf-8")
     print(f"\n📄 報告已輸出：{MD_REPORT}")
+
+
 
 def main():
     parser = argparse.ArgumentParser()
