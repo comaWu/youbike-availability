@@ -2,7 +2,7 @@
 import json
 import numpy as np
 from pathlib import Path
-from .features import build_features
+from .features_noRes import build_features
 from .config import DEFAULT_CITY, DEFAULT_SNO, HORIZON_MIN
 
 OUT_DIR = Path(__file__).resolve().parents[1] / "models" / "latest"

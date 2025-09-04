@@ -1,6 +1,6 @@
 {
   "model": "moving_average_baseline(ma_2)",
-  "mae_test": 0.7592951755449276,
+  "mae_test": 0.6490567930965282,
   "horizon_min": 1,
   "features": [
     "hour",
@@ -9,8 +9,11 @@
     "tot",
     "lag_1",
     "lag_2",
+    "lag_3",
+    "lag_5",
     "ma_2",
-    "ma_3"
+    "ma_3",
+    "ma_5"
   ],
   "city": "TPE",
   "sno": null

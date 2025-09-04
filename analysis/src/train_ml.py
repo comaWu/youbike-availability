@@ -3,7 +3,7 @@ from pathlib import Path
 import joblib
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error
-from .features import build_features
+from .features_noRes import build_features
 from .config import DEFAULT_CITY, DEFAULT_SNO, HORIZON_MIN
 
 OUT_DIR = Path(__file__).resolve().parents[1] / "models" / "latest"
