@@ -22,6 +22,8 @@ REG_FEATS_PATH   = MODELS_DIR / "feature_columns_any_reg.json"
 
 STATIONS_JSON = ROOT / "analysis" / "src" / "stations.json"
 
+EVAL_SUMMARY_CLS = MODELS_DIR / "eval_any_summary.json"
+
 # ---- 站點索引 ----
 _st_idx: dict[str, dict[str, dict]] | None = None
 def _ensure_station_index():
@@ -78,6 +80,16 @@ def _load_cls_feats():
 def _load_reg_feats():
     return _load_json(REG_FEATS_PATH, get_feature_columns_timeonly())
 
+# ---- PR/ROC 的「自動最佳化閾值」 ----
+def _load_recommended_threshold() -> float | None:
+    if EVAL_SUMMARY_CLS.exists():
+        try:
+            obj = json.loads(EVAL_SUMMARY_CLS.read_text(encoding="utf-8"))
+            return obj.get("recommended_thresholds", {}).get("threshold_recommended")
+        except Exception:
+            return None
+    return None
+
 # ---- 主功能 ----
 def predict_one_anytime(
     *,
@@ -104,6 +116,8 @@ def predict_one_anytime(
     base["lat"] = float(st.get("lat") or 0)
     base["lng"] = float(st.get("lng") or 0)
 
+    rec_thr = _load_recommended_threshold()
+
     res: Dict[str, Any] = {
         "ok": True,
         "city": city,
@@ -113,6 +127,8 @@ def predict_one_anytime(
         "pred_available": None,
         "decision": None,
         "msg": None,
+        "threshold_recommended": rec_thr,
+        "decision_recommended": None,
     }
 
     # 3) 分類
@@ -128,6 +144,9 @@ def predict_one_anytime(
         except Exception as e:
             res["ok"] = False
             res["msg"] = f"classification predict failed: {e}"
+
+        if rec_thr is not None and res["proba_can_rent"] is not None:
+            res["decision_recommended"] = bool(res["proba_can_rent"] >= rec_thr)
 
     # 4) 迴歸
     reg = _load_reg()

@@ -147,6 +147,42 @@ def plot_roc(y_true, y_prob, title, out_png: Path):
     plt.tight_layout(); plt.savefig(out_png, dpi=140); plt.close()
     return float(auc)
 
+def _best_thresholds(y_true: np.ndarray, y_prob: np.ndarray) -> dict:
+    # PR-based thresholds
+    prec, rec, thr_pr = precision_recall_curve(y_true, y_prob)
+    thr_pr = np.append(thr_pr, 1.0)  # 對齊長度
+
+    def fbeta(p, r, b=1.0):
+        b2 = b*b
+        denom = b2*p + r
+        return (1+b2)*p*r/denom if denom>0 else 0.0
+
+    f1_vals  = np.array([fbeta(p, r, 1.0) for p, r in zip(prec, rec)])
+    f05_vals = np.array([fbeta(p, r, 0.5) for p, r in zip(prec, rec)])
+    f2_vals  = np.array([fbeta(p, r, 2.0) for p, r in zip(prec, rec)])
+
+    i_f1  = int(np.nanargmax(f1_vals))
+    i_f05 = int(np.nanargmax(f05_vals))
+    i_f2  = int(np.nanargmax(f2_vals))
+
+    thr_f1  = float(thr_pr[i_f1])
+    thr_f05 = float(thr_pr[i_f05])
+    thr_f2  = float(thr_pr[i_f2])
+
+    # ROC-based threshold (Youden's J)
+    fpr, tpr, thr_roc = roc_curve(y_true, y_prob)
+    j_scores = tpr - fpr
+    i_j = int(np.nanargmax(j_scores))
+    thr_j = float(thr_roc[i_j])
+
+    return {
+        "thr_f1": thr_f1,
+        "thr_f05": thr_f05,
+        "thr_f2": thr_f2,
+        "thr_youdenJ": thr_j,
+        # 推薦一個主閾值（你可改成 thr_youdenJ 或任何策略）
+        "threshold_recommended": thr_f1
+    }
 
 def main():
     ap = argparse.ArgumentParser(description="Train classification (time-only) for absolute-time can-rent probability")
@@ -191,7 +227,8 @@ def main():
     prob_val = model.predict(X_val)
     ap = average_precision_score(y_val, prob_val)
     auc = roc_auc_score(y_val, prob_val)
-    log.info(f"[METRIC] AP={ap:.4f}, AUC={auc:.4f}")
+    best_thrs = _best_thresholds(y_val, prob_val)
+    log.info(f"[METRIC] AP={ap:.4f}, AUC={auc:.4f}, thr(rec)={best_thrs['threshold_recommended']:.3f}")
 
     # 6) 繪圖
     log.info("[STEP] 產生 PR/ROC 圖")
@@ -220,6 +257,9 @@ def main():
         "train_city": TRAIN_CITY,
         "train_start": TRAIN_START,
         "train_end": TRAIN_END,
+        "ap_valid": float(ap),
+        "auc_valid": float(auc),
+        "recommended_thresholds": best_thrs,
     }
     EVAL_SUMMARY.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     log.info(f"[DONE] 訓練完成，摘要：{EVAL_SUMMARY}")
