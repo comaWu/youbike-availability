@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI,Query
 from analysis.src import predict_anytime, server_fastapi
 
 app = FastAPI()
