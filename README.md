@@ -51,7 +51,7 @@ python -m analysis.src.evaluate
 python -m analysis.src.predict_once
 
 python -m analysis.src.check_pipeline --mode brief --days 3 --horizon 5
-python -m analysis.src.check_pipeline --mode brief --days 3 --horizon 5
+
 python -m analysis.src.check_pipeline
 
 

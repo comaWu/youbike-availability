@@ -22,6 +22,17 @@
       "env": { "PYTHONPATH": "${workspaceFolder}" },
       "console": "integratedTerminal",
       "justMyCode": true
+    },
+    {
+      "name": "Train check_pipeline_anytime (module)",
+      "type": "python",
+      "request": "launch",
+      "module": "analysis.src.check_pipeline_anytime",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": { "PYTHONPATH": "${workspaceFolder}" },
+      "console": "integratedTerminal",
+      "justMyCode": true
     }
   ]
 }

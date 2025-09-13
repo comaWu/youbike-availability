@@ -1,190 +1,203 @@
-import { useEffect, useRef, useState } from 'react'
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap, ScaleControl, useMapEvents } from 'react-leaflet'
-import L from 'leaflet'
+import { useEffect, useMemo, useState } from 'react'
+import { MapContainer, TileLayer, CircleMarker, Popup, ScaleControl } from 'react-leaflet'
+import 'leaflet/dist/leaflet.css'
 
-// ========== 工具：Nominatim 地理編碼（地址 -> [lat,lng]） ==========
-async function geocodeAddress(query) {
-  if (!query) return null
-  const url = new URL('https://nominatim.openstreetmap.org/search')
-  url.searchParams.set('q', query)
-  url.searchParams.set('format', 'json')
-  url.searchParams.set('addressdetails', '1')
-  url.searchParams.set('limit', '1')
-  const res = await fetch(url, { headers: { 'Accept': 'application/json', 'User-Agent': 'youbike-availability-demo' }})
-  const data = await res.json()
-  if (!Array.isArray(data) || data.length === 0) return null
-  return [parseFloat(data[0].lat), parseFloat(data[0].lon)]
-}
+// 後端位址（vite：在 .env 內用 VITE_API_BASE_URL 設定；否則預設 localhost:8000）
+const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const CITY = 'TPE' // 目前以台北市為例，如要切換城市可改由 UI 控制
 
-// ========== 路由元件（Leaflet Routing Machine） ==========
-function Routing({ start, end, profile }) {
-  const map = useMap()
-  const controlRef = useRef(null)
-
-  useEffect(() => {
-    if (!start || !end) {
-      if (controlRef.current) {
-        map.removeControl(controlRef.current)
-        controlRef.current = null
+// 產生 24 小時、每 5 分鐘一個選項
+function useTimeOptions() {
+  return useMemo(() => {
+    const out = []
+    for (let h = 0; h < 24; h++) {
+      for (let m = 0; m < 60; m += 5) {
+        const hh = String(h).padStart(2, '0')
+        const mm = String(m).padStart(2, '0')
+        out.push(`${hh}:${mm}`)
       }
-      return
     }
-
-    const serviceUrl = 'https://router.project-osrm.org/route/v1' // OSRM 公共 demo
-    const profiles = { walk: 'foot', bike: 'bike', car: 'car' }
-    const osrmProfile = profiles[profile] ?? 'foot'
-
-    if (controlRef.current) {
-      map.removeControl(controlRef.current)
-      controlRef.current = null
-    }
-
-    const control = L.Routing.control({
-      waypoints: [ L.latLng(start[0], start[1]), L.latLng(end[0], end[1]) ],
-      router: L.Routing.osrmv1({ serviceUrl, profile: osrmProfile }),
-      lineOptions: { styles: [{ color: '#2c7be5', weight: 5, opacity: 0.8 }] },
-      show: false,
-      addWaypoints: false,
-      fitSelectedRoutes: true,
-      routeWhileDragging: false
-    }).addTo(map)
-
-    controlRef.current = control
-    return () => { if (controlRef.current) map.removeControl(controlRef.current) }
-  }, [map, start, end, profile])
-
-  return null
+    return out
+  }, [])
 }
 
-// ========== 點擊地圖設定起/終點 ==========
-function ClickToSet({ setStart, setEnd, mode }) {
-  useMapEvents({
-    click(e) {
-      const { lat, lng } = e.latlng
-      if (mode === 'start') setStart([lat, lng])
-      if (mode === 'end') setEnd([lat, lng])
-    }
-  })
-  return null
+function colorByProba(p) {
+  if (p == null || Number.isNaN(p)) return '#95a5a6' // 尚未預測
+  if (p >= 0.8) return '#2ecc71'
+  if (p >= 0.6) return '#8bc34a'
+  if (p >= 0.4) return '#f1c40f'
+  if (p >= 0.2) return '#ff9800'
+  return '#e74c3c'
 }
 
-// ========== 右上角圖例（沿用你現有的） ==========
-function Legend() {
-  const map = useMap()
-  useEffect(() => {
-    const legend = L.control({ position: 'topright' })
-    legend.onAdd = () => {
-      const div = L.DomUtil.create('div', 'info legend')
-      div.innerHTML = `
-        <h4>可租機率</h4>
-        <i style="background:#2ecc71"></i> 高 (≥ 66%)<br>
-        <i style="background:#f1c40f"></i> 中 (33% - 66%)<br>
-        <i style="background:#e74c3c"></i> 低 (&lt; 33%)<br>
-      `
-      return div
-    }
-    legend.addTo(map)
-    return () => legend.remove()
-  }, [map])
-  return null
+function joinDateTime(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return ''
+  return `${dateStr} ${timeStr}`
 }
-
-// ========== 假資料（你的站點資料可替換） ==========
-const DEMO = [
-  { sno:'D1', sna:'示範站 A', lat:25.0418, lng:121.5366, tot:28, available_now:10, pred_available:8 },
-  { sno:'D2', sna:'示範站 B', lat:25.0524, lng:121.5442, tot:22, available_now: 3, pred_available:5 },
-  { sno:'D3', sna:'示範站 C', lat:25.0339, lng:121.5654, tot:30, available_now:25, pred_available:24 },
-]
 
 export default function MapPage() {
-  const [stations, setStations] = useState([])
-  const [start, setStart] = useState(null)      // [lat,lng]
-  const [end, setEnd] = useState(null)          // [lat,lng]
-  const [profile, setProfile] = useState('walk')// 'walk' | 'bike' | 'car'
-  const [clickMode, setClickMode] = useState('start') // 點圖設定起點或終點
+  const [stations, setStations] = useState([]) // [{sno,sna,lat,lng,tot,available_now?,proba?,pred?}]
+  const [loadingStations, setLoadingStations] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
 
-  // 載入站點（可改為呼叫你的 /api/predict_batch）
+  // 預設日期：今天；預設時間：現在+30 分
+  const now = new Date()
+  const pad = n => String(n).padStart(2, '0')
+  const [defaultDate] = useState(`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`)
+  const [defaultTime] = useState(() => {
+    const t = new Date(now.getTime() + 30*60000)
+    return `${pad(t.getHours())}:${pad(t.getMinutes())}`
+  })
+  const timeOptions = useTimeOptions()
+
+  // 1) 載入所有站點（只拿基本資訊，不做預測）
   useEffect(() => {
-    const url = import.meta.env.VITE_API_BASE_URL &&
-                `${import.meta.env.VITE_API_BASE_URL}/api/predict_batch?city=NTP&h=5`
-    if (!url) { setStations(DEMO); return }
-    fetch(url).then(r => r.json()).then(d => Array.isArray(d) ? setStations(d) : setStations(DEMO)).catch(() => setStations(DEMO))
+    async function loadStations() {
+      try {
+        setLoadingStations(true)
+        setErrorMsg('')
+        const res = await fetch(`${API}/api/stations?city=${CITY}`)
+        const arr = await res.json()
+        const init = (Array.isArray(arr) ? arr : []).map(s => ({
+          ...s,
+          proba: null,      // 可租機率（0~1）
+          predAvail: null,  // 預估可借數量（整數）
+        }))
+        setStations(init)
+      } catch (err) {
+        console.error('[api/stations] failed:', err)
+        setErrorMsg('載入站點失敗，請確認 API 是否啟動')
+        setStations([])
+      } finally {
+        setLoadingStations(false)
+      }
+    }
+    loadStations()
   }, [])
 
-  // 簡單 UI：搜尋欄 + 模式切換 + 清除
-  async function handleGeocode(which) {
-    const q = prompt(which === 'start' ? '輸入起點地址' : '輸入終點地址')
-    if (!q) return
-    const pos = await geocodeAddress(q)
-    if (!pos) { alert('找不到這個地址'); return }
-    if (which === 'start') setStart(pos)
-    else setEnd(pos)
+  // 2) 單站預測：用戶在彈窗內選日期+時間，送出後更新該站資料
+  async function predictOne(sno, dateStr, timeStr) {
+    const target = joinDateTime(dateStr, timeStr)
+    if (!target) return
+    try {
+      const url = `${API}/api/predict_one?city=${encodeURIComponent(CITY)}&sno=${encodeURIComponent(sno)}&target=${encodeURIComponent(target)}`
+      const res = await fetch(url)
+      const d = await res.json()
+      console.log('[predict_one result]', d)
+      if (d?.ok) {
+        setStations(prev => prev.map(s =>
+          String(s.sno) === String(sno)
+            ? { ...s, proba: d.proba_can_rent ?? null, predAvail: d.pred_available ?? null }
+            : s
+        ))
+      } else {
+        alert(`預測失敗：${d?.msg ?? 'unknown error'}`)
+      }
+    } catch (e) {
+      console.error('[api/predict_one] failed:', e)
+      alert('呼叫 /api/predict_one 失敗，請查看瀏覽器 Console 或後端日誌')
+    }
   }
 
   return (
-    <>
-      {/* 浮動控制列 */}
-      <div style={{
-        position:'absolute', zIndex:1000, top:12, left:12,
-        background:'white', padding:'8px 12px', borderRadius:8,
-        boxShadow:'0 2px 12px rgba(0,0,0,0.15)', display:'flex', gap:8, alignItems:'center'
-      }}>
-        <button onClick={() => handleGeocode('start')}>輸入起點地址</button>
-        <button onClick={() => handleGeocode('end')}>輸入終點地址</button>
-        <select value={profile} onChange={e => setProfile(e.target.value)}>
-          <option value="walk">步行</option>
-          <option value="bike">自行車</option>
-          <option value="car">汽車</option>
-        </select>
-        <select value={clickMode} onChange={e => setClickMode(e.target.value)}>
-          <option value="start">點圖設定起點</option>
-          <option value="end">點圖設定終點</option>
-        </select>
-        <button onClick={() => { setStart(null); setEnd(null); }}>清除路線</button>
+    <div style={{ position: 'relative', height: '100vh', width: '100%' }}>
+      {/* 右下角圖例 */}
+      <div style={{ position:'absolute', right:12, bottom:12, zIndex:1000,
+                    background:'#fff', padding:'8px 12px', borderRadius:8,
+                    boxShadow:'0 2px 12px rgba(0,0,0,0.15)', fontSize:13 }}>
+        <div style={{ fontWeight:600, marginBottom:4 }}>機率圖例</div>
+        <div><span style={{display:'inline-block',width:10,height:10,background:'#2ecc71',borderRadius:2,marginRight:6}}></span>≥ 0.8</div>
+        <div><span style={{display:'inline-block',width:10,height:10,background:'#8bc34a',borderRadius:2,marginRight:6}}></span>0.6–0.79</div>
+        <div><span style={{display:'inline-block',width:10,height:10,background:'#f1c40f',borderRadius:2,marginRight:6}}></span>0.4–0.59</div>
+        <div><span style={{display:'inline-block',width:10,height:10,background:'#ff9800',borderRadius:2,marginRight:6}}></span>0.2–0.39</div>
+        <div><span style={{display:'inline-block',width:10,height:10,background:'#e74c3c',borderRadius:2,marginRight:6}}></span>{'< 0.2'}</div>
+        <div style={{marginTop:6,color:'#666'}}>
+          {loadingStations ? '載入站點中…' : (errorMsg || '')}
+        </div>
       </div>
 
-      <MapContainer center={[25.04, 121.55]} zoom={12} style={{ height: '100vh', width: '100%' }}>
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                   attribution="&copy; OpenStreetMap contributors" />
+      <MapContainer center={[25.04, 121.55]} zoom={12} style={{ height: '100%', width: '100%' }}>
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution="&copy; OpenStreetMap contributors"
+        />
         <ScaleControl position="bottomleft" metric />
 
-        <Legend />
-        <ClickToSet setStart={setStart} setEnd={setEnd} mode={clickMode} />
-
-        {/* 起終點標記（可用 CircleMarker 或 Marker） */}
-        {start && (
-          <CircleMarker center={start} radius={9} pathOptions={{ color:'#2c7be5', fillColor:'#2c7be5', fillOpacity:0.9 }}>
-            <Popup>起點</Popup>
-          </CircleMarker>
-        )}
-        {end && (
-          <CircleMarker center={end} radius={9} pathOptions={{ color:'#e83e8c', fillColor:'#e83e8c', fillOpacity:0.9 }}>
-            <Popup>終點</Popup>
-          </CircleMarker>
-        )}
-
-        {/* 站點（示範） */}
-        {Array.isArray(stations) && stations.map(s => {
-          const p = s.prob_rentable ?? (s.pred_available / Math.max(1, s.tot))
-          const color = p >= 0.66 ? '#2ecc71' : p >= 0.33 ? '#f1c40f' : '#e74c3c'
+        {stations.map((s) => {
+          const color = colorByProba(s.proba)
           return (
-            <CircleMarker key={s.sno} center={[s.lat, s.lng]} radius={7}
-              pathOptions={{ color, fillColor: color, fillOpacity: 0.85 }}>
+            <CircleMarker
+              key={s.sno}
+              center={[s.lat, s.lng]}
+              radius={7}
+              pathOptions={{ color, fillColor: color, fillOpacity: 0.9 }}
+            >
               <Popup>
-                <div style={{ minWidth: 180 }}>
-                  <strong>{s.sna}</strong><br/>
-                  目前可借：{s.available_now ?? '-'} / {s.tot}<br/>
-                  5 分鐘後預測：{s.pred_available?.toFixed(1) ?? '-'}<br/>
-                  可租機率：約 {(p*100).toFixed(0)}%
-                </div>
+                <PerStationPopup
+                  station={stations.find(x => String(x.sno) === String(s.sno)) || s}
+                  defaultDate={defaultDate}
+                  defaultTime={defaultTime}
+                  timeOptions={timeOptions}
+                  onPredict={(dateStr, timeStr) => predictOne(s.sno, dateStr, timeStr)}
+                />
               </Popup>
             </CircleMarker>
           )
         })}
-
-        {/* 路徑繪製 */}
-        <Routing start={start} end={end} profile={profile} />
       </MapContainer>
-    </>
+    </div>
+  )
+}
+
+// 子元件：單一站點的彈窗內容（含時間輸入與下拉）
+function PerStationPopup({ station, defaultDate, defaultTime, timeOptions, onPredict }) {
+  const [dateStr, setDateStr] = useState(defaultDate)
+  const [timeInput, setTimeInput] = useState(defaultTime)
+  const [timeSelect, setTimeSelect] = useState(defaultTime)
+
+  // 兩個時間來源保持同步：使用者改其中一個，就套用到另一個
+  useEffect(() => { setTimeSelect(timeInput) }, [timeInput])
+  useEffect(() => { setTimeInput(timeSelect) }, [timeSelect])
+
+  const probaPct = station.proba == null ? '-' : `${Math.round(station.proba * 100)}%`
+  const availStr = station.predAvail == null ? '-' : `${station.predAvail} 台`
+
+  return (
+    <div style={{ minWidth: 280 }}>
+      <div style={{ fontWeight: 600 }}>{station.sna ?? station.sno}</div>
+      <div style={{ color: '#555', marginBottom: 8 }}>
+        目前可借：{station.available_now ?? '-'} / {station.tot ?? '-'}
+      </div>
+
+      <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6 }}>
+        <label style={{ width: 72 }}>日期</label>
+        <input type="date" value={dateStr} onChange={e => setDateStr(e.target.value)} />
+      </div>
+
+      <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6 }}>
+        <label style={{ width: 72 }}>時間（輸入）</label>
+        <input type="time" value={timeInput} onChange={e => setTimeInput(e.target.value)} step={60} />
+      </div>
+
+      <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+        <label style={{ width: 72 }}>時間（下拉）</label>
+        <select value={timeSelect} onChange={e => setTimeSelect(e.target.value)}>
+          {timeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+
+      <button
+        onClick={() => onPredict(dateStr, timeInput)}
+        style={{ padding:'6px 10px', borderRadius:6, background:'#2563eb', color:'#fff', border:'none' }}
+      >
+        預測此時段
+      </button>
+
+      <div style={{ marginTop:8, lineHeight:1.6 }}>
+        指定時間：{dateStr} {timeInput}<br/>
+        可租機率：<b>{probaPct}</b><br/>
+        預估可借：<b>{availStr}</b>
+      </div>
+    </div>
   )
 }

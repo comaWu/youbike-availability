@@ -1,204 +1,144 @@
 # analysis/src/features.py
-# -*- coding: utf-8 -*-
-"""
-YouBike 特徵工程（單站 / 多站皆可）
-- 從 DB 撈取分鐘資料
-- 逐站補齊時間軸 (1min)
-- 時間特徵、滯後特徵、移動平均
-- 目標 y = 未來 horizon 分鐘後的 available
-"""
-
+# --- Time-only features (no lags / no recent state) --------------------------
 from __future__ import annotations
-import pandas as pd
 import numpy as np
-import psycopg
-from typing import Iterable, List, Optional, Tuple
-from .config import PG_DSN, HORIZON_MIN, LOOKBACK_MIN, DEFAULT_CITY, DEFAULT_SNO
+import pandas as pd
 
-# === 可調參數 ===
-DEFAULT_LAGS = (1, 2, 3, 5, 10)      # 滯後特徵
-DEFAULT_MA   = (3, 5, 10)            # 移動平均視窗
-USE_MA       = True                  # 是否啟用移動平均特徵
+# 時區處理
+try:
+    from zoneinfo import ZoneInfo
+    TPE_TZ = ZoneInfo("Asia/Taipei")
+except Exception:  # 老版本 Python 備援
+    TPE_TZ = "Asia/Taipei"
 
-# ---------------------------------------------------------------------
-# DB 載入（請確保 station_minute 欄位至少有：ts, available, empty, tot, city, sno）
-# ---------------------------------------------------------------------
-def load_series(city: str, sno: Optional[str], days: int = 14) -> pd.DataFrame:
-    interval_expr = f"{days} days"
-    q = f"""
-    SELECT sm.ts, sm.available, sm.empty, s.tot, sm.city, sm.sno
-    FROM station_minute sm
-    JOIN station s ON s.city=sm.city AND s.sno=sm.sno
-    WHERE sm.ts >= now() - interval '{interval_expr}'
-    AND sm.city = %s
-    """
-    params = [city]
-    if sno:
-        q += " AND sm.sno = %s"
-        params.append(sno)
-    q += " ORDER BY sm.city, sm.sno, sm.ts"
+# 若要更精準可填入台灣國定假日：{"2025-01-01", "2025-02-28", ...}
+TW_HOLIDAYS: set[str] = set()
 
-    with psycopg.connect(PG_DSN) as conn:
-        df = pd.read_sql(q, conn, params=params)
+# 本模型用到的特徵欄位（訓練與推論要一致）
+FEATS_TIMEONLY = [
+    "tgt_hour", "tgt_dow",
+    "tgt_is_weekend", "tgt_is_holiday",
+    "tgt_is_peak", "tgt_is_night", "tgt_is_lunch",
+    "tgt_hour_sin", "tgt_hour_cos",
+    "tgt_dow_sin", "tgt_dow_cos",
+    # 如需把站點/城市也做成特徵，可自行 one-hot / embedding；此處不強制
+]
 
-    # datetime 處理
-    if not pd.api.types.is_datetime64_any_dtype(df["ts"]):
-        df["ts"] = pd.to_datetime(df["ts"], utc=True)
+def _to_tpe(ts) -> pd.Timestamp:
+    """把字串或 timestamp 轉成台北時間的 timezone-aware Timestamp。"""
+    t = pd.to_datetime(ts)
+    if isinstance(TPE_TZ, str):
+        return (t.tz_localize(TPE_TZ) if t.tzinfo is None else t.tz_convert(TPE_TZ))
     else:
-        if df["ts"].dt.tz is None:
-            df["ts"] = df["ts"].dt.tz_localize("UTC")
-        else:
-            df["ts"] = df["ts"].dt.tz_convert("UTC")
+        return (t.tz_localize(TPE_TZ) if t.tzinfo is None else t.tz_convert(TPE_TZ))
 
-    return df
+def _row_time_features(ts_local: pd.Timestamp) -> dict:
+    """給定(台北時間) timestamp，產生一列時間特徵。"""
+    hour = int(ts_local.hour)
+    dow  = int(ts_local.dayofweek)      # 0=Mon, 6=Sun
+    is_weekend = int(dow in (5, 6))
+    is_holiday = int(ts_local.date().isoformat() in TW_HOLIDAYS)
 
+    # 你可以依需求調整時段旗標
+    is_peak  = int(hour in (7, 8, 9, 17, 18, 19))
+    is_night = int(hour >= 23 or hour < 6)
+    is_lunch = int(hour in (12, 13))
 
-# ---------------------------------------------------------------------
-# 逐站重採樣（解決多站時 ts 重覆 reindex 會報錯）
-# ---------------------------------------------------------------------
-def resample_per_station(raw: pd.DataFrame) -> pd.DataFrame:
-    """
-    以 (city, sno) 分組，逐站補齊分鐘索引並做基本缺值處理。
-    """
-    raw = raw.sort_values(["city", "sno", "ts"])
+    hr_rad  = 2 * np.pi * hour / 24.0
+    dow_rad = 2 * np.pi * dow  / 7.0
 
-    def _resample_one(g: pd.DataFrame) -> pd.DataFrame:
-        # 同站若有重覆時間戳，保留最後一筆
-        g = g.drop_duplicates(subset=["ts"], keep="last").sort_values("ts")
-        idx = pd.date_range(g["ts"].min(), g["ts"].max(), freq="1min", tz="UTC")
-        out = (
-            g.set_index("ts")
-             .reindex(idx)              # 僅針對此站自己的時間軸
-             .rename_axis("ts")
-             .reset_index()
-        )
-        # 補欄位
-        out["city"] = out["city"].ffill().bfill()
-        out["sno"]  = out["sno"].ffill().bfill()
-        out["tot"]  = out["tot"].ffill()
-        out["available"] = out["available"].fillna(0)
-        out["empty"]     = out["empty"].fillna(0)
-        return out
+    return {
+        "tgt_hour": hour,
+        "tgt_dow": dow,
+        "tgt_is_weekend": is_weekend,
+        "tgt_is_holiday": is_holiday,
+        "tgt_is_peak": is_peak,
+        "tgt_is_night": is_night,
+        "tgt_is_lunch": is_lunch,
+        "tgt_hour_sin": float(np.sin(hr_rad)),
+        "tgt_hour_cos": float(np.cos(hr_rad)),
+        "tgt_dow_sin": float(np.sin(dow_rad)),
+        "tgt_dow_cos": float(np.cos(dow_rad)),
+    }
 
-    out = (
-        raw.groupby(["city", "sno"], group_keys=False)
-           .apply(_resample_one)
-           .reset_index(drop=True)
-    )
-    return out
-
-
-# ---------------------------------------------------------------------
-# 特徵函式
-# ---------------------------------------------------------------------
-def make_time_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    產生時間特徵（皆以 UTC 為基準；若你要轉台灣時間，可在這裡加 .dt.tz_convert('Asia/Taipei')）
-    """
-    out = df.copy()
-    out["ts_local"] = out["ts"]  # 如需本地時間可改 tz
-    out["hour"] = out["ts_local"].dt.hour.astype(np.int16)
-    out["dow"]  = out["ts_local"].dt.weekday.astype(np.int8)  # Mon=0
-    out["is_weekend"] = (out["dow"] >= 5).astype(np.int8)
-    return out
-
-
-def make_lag_features(df: pd.DataFrame, lags: Iterable[int] = DEFAULT_LAGS) -> pd.DataFrame:
-    """
-    對 available 產生滯後特徵 lag_k（每個站獨立計算）
-    """
-    out = df.copy()
-    out = out.sort_values(["city", "sno", "ts"])
-    for k in lags:
-        out[f"lag_{k}"] = out.groupby(["city", "sno"])["available"].shift(k)
-    return out
-
-
-def make_ma_features(df: pd.DataFrame, windows: Iterable[int] = DEFAULT_MA) -> pd.DataFrame:
-    """
-    對 available 產生移動平均 ma_w（每個站獨立計算）
-    """
-    out = df.copy()
-    out = out.sort_values(["city", "sno", "ts"])
-    for w in windows:
-        out[f"ma_{w}"] = (
-            out.groupby(["city", "sno"])["available"]
-               .rolling(window=w, min_periods=max(1, w // 2))
-               .mean()
-               .reset_index(level=[0,1], drop=True)
-        )
-    return out
-
-
-def attach_target(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
-    """
-    y = 未來 horizon 分鐘後的 available（每站獨立對齊）
-    """
-    out = df.copy()
-    out = out.sort_values(["city", "sno", "ts"])
-    out["y"] = out.groupby(["city", "sno"])["available"].shift(-horizon)
-    return out
-
-
-# ---------------------------------------------------------------------
-# 主流程：build_features
-# ---------------------------------------------------------------------
-def build_features(
-    city: str = DEFAULT_CITY,
-    sno: Optional[str] = DEFAULT_SNO,
-    days: int = 14,
-    horizon: int = HORIZON_MIN,
-    lags: Iterable[int] = DEFAULT_LAGS,
-    ma_windows: Iterable[int] = DEFAULT_MA,
+# --------------------------------------------------------------------------- #
+#  A) 推論用：只給 (city, sno, target_local_iso) → 回一列特徵 DataFrame
+# --------------------------------------------------------------------------- #
+def build_timeonly_features_for_target(
+    *, city: str, sno: str | None, target_local_iso: str
 ) -> pd.DataFrame:
     """
-    建構訓練用特徵表：
-    - 逐站重採樣 → 時間特徵 → lag → (optional) 移動平均 → y
-    - 類別特徵：city/sno 以字串形式輸出（LightGBM 會吃 category）
+    生成一筆『只靠時間』的特徵列，用於「絕對時間」推論。
+    不讀任何即時/歷史狀態，因此可預測資料以後的日期。
     """
-    print(f"=== 開始建構特徵 city={city}, sno={sno}, days={days}, horizon={horizon} ===")
+    ts = _to_tpe(target_local_iso)
+    row = {
+        "city": city,
+        "sno": sno,
+        "ts_local": ts,   # 方便除錯，模型不一定要用
+        **_row_time_features(ts),
+    }
+    return pd.DataFrame([row])
 
-    # 1) 撈資料
-    raw = load_series(city, sno, days=days)
-    print(f"[RAW] shape={raw.shape}")
-    if raw.empty:
-        return raw
+# --------------------------------------------------------------------------- #
+#  B) 訓練用：給一個含有 ts_local & y 的 DataFrame，回加上時間特徵
+# --------------------------------------------------------------------------- #
+def add_timeonly_features_for_training(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    以向量化方式產生時間特徵；比逐列 map/apply 快很多。
+    需要欄位：ts_local（tz-aware 或可轉換字串）
+    """
+    out = df.copy()
 
-    # 2) 逐站重採樣（解決多站重覆 ts 問題）
-    raw = resample_per_station(raw)
-    print(f"[RESAMPLED] shape={raw.shape}")
+    # 1) 時區標準化（一次處理整欄）
+    ts = pd.to_datetime(out["ts_local"], errors="coerce")
+    if ts.isna().any():
+        raise ValueError(f"ts_local 有 {int(ts.isna().sum())} 筆無法轉時間")
 
-    # 3) 時間特徵
-    feat = make_time_features(raw)
-    # 4) 滯後特徵
-    feat = make_lag_features(feat, lags=lags)
-    # 5) 移動平均（可關閉）
-    if USE_MA and ma_windows:
-        feat = make_ma_features(feat, windows=ma_windows)
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Asia/Taipei")
+        ts = ts.dt.tz_localize(tz) if ts.dt.tz is None else ts.dt.tz_convert(tz)
+    except Exception:
+        tz = "Asia/Taipei"
+        ts = ts.dt.tz_localize(tz) if ts.dt.tz is None else ts.dt.tz_convert(tz)
 
-    # 6) 目標 y
-    feat = attach_target(feat, horizon=horizon)
+    # （小優化）去掉 tz，之後 .dt 學生產會略快、也省記憶體
+    ts_naive = ts.dt.tz_convert(tz).dt.tz_localize(None)
 
-    # 類別特徵（轉字串，推論時會轉 category）
-    feat["city"] = feat["city"].astype(str)
-    feat["sno"]  = feat["sno"].astype(str)
+    # 2) 向量化抽取欄位
+    hour = ts_naive.dt.hour
+    dow  = ts_naive.dt.dayofweek  # 0=Mon, 6=Sun
 
-    # 7) 清理不可用樣本：至少要有 available / lag_x / ma_x（若開啟）與 y
-    need_cols = ["available"] + [c for c in feat.columns if c.startswith("lag_")]
-    if USE_MA:
-        need_cols += [c for c in feat.columns if c.startswith("ma_")]
+    # 3) 向量化旗標
+    is_weekend = dow.isin([5, 6]).astype("int8")
+    is_holiday = pd.Series(0, index=out.index, dtype="int8")  # 若要國定假日，這裡再補
 
-    before = len(feat)
-    feat = feat.dropna(subset=need_cols + ["y"])
-    after = len(feat)
-    print(f"[FINAL] shape={feat.shape}  dropped={before - after}")
+    is_peak  = hour.isin([7,8,9,17,18,19]).astype("int8")
+    is_night = ((hour >= 23) | (hour < 6)).astype("int8")
+    is_lunch = hour.isin([12,13]).astype("int8")
 
-    return feat
+    # 4) 向量化 sin/cos
+    import numpy as np
+    hr_rad  = 2 * np.pi * hour.to_numpy() / 24.0
+    dow_rad = 2 * np.pi * dow.to_numpy()  / 7.0
 
+    out["tgt_hour"]        = hour.astype("int8")
+    out["tgt_dow"]         = dow.astype("int8")
+    out["tgt_is_weekend"]  = is_weekend
+    out["tgt_is_holiday"]  = is_holiday
+    out["tgt_is_peak"]     = is_peak
+    out["tgt_is_night"]    = is_night
+    out["tgt_is_lunch"]    = is_lunch
+    out["tgt_hour_sin"]    = np.sin(hr_rad).astype("float32")
+    out["tgt_hour_cos"]    = np.cos(hr_rad).astype("float32")
+    out["tgt_dow_sin"]     = np.sin(dow_rad).astype("float32")
+    out["tgt_dow_cos"]     = np.cos(dow_rad).astype("float32")
 
-# ---------------------------------------------------------------------
-# 便利 CLI：直接在終端測試
-# ---------------------------------------------------------------------
-if __name__ == "__main__":
-    df = build_features()
-    print(df.head())
+    # 回存（保留原欄位；ts_local 換成 tz-aware 也可，這裡留原樣）
+    out["ts_local"] = ts
+    return out
+
+# 便利函式：取訓練用的特徵欄位清單
+def get_feature_columns_timeonly() -> list[str]:
+    return FEATS_TIMEONLY[:]
