@@ -1,22 +1,26 @@
 # /api/index.py
-from fastapi import FastAPI, Query
-# 直接沿用你 analysis 的邏輯
-from analysis.src import predict_anytime  # 依你的模組路徑調整
-from analysis.src import server_fastapi   # 若你已寫好 handler 也可直接 import 使用
+from fastapi import FastAPI, Query, HTTPException
+from typing import Optional
+
+# 同資料夾匯入（已搬進 /api）
+from predict_anytime import run_prediction_one   # 依你的函式名調整
+import server_fastapi  # 若裡面有工具函式可照用
 
 app = FastAPI()
 
-@app.get("/stations")
-def stations(city: str = Query(...)):
-    return server_fastapi.list_stations(city)  
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 @app.get("/predict_one")
-def predict_one(city: str, sno: str, target: str):
-    # 舉例：呼叫你的預測函式
-    r = predict_anytime.run_prediction_one(city=city, sno=sno, target=target)
-    # 依照前端期望欄位回傳
-    return {
-        "ok": True,
-        "proba_can_rent": r["proba"],    # 0~1
-        "pred_available": r["available"] # 整數
-    }
+def predict_one(city: str = Query(...), sno: str = Query(...), target: str = Query(...)):
+    try:
+        r = run_prediction_one(city=city, sno=sno, target=target)
+        return {
+            "ok": True,
+            "proba_can_rent": r["proba"],
+            "pred_available": r["available"]
+        }
+    except Exception as e:
+        # 保底錯誤處理
+        raise HTTPException(status_code=500, detail=str(e))

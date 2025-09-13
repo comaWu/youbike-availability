@@ -8,8 +8,8 @@ import joblib
 import pandas as pd
 import numpy as np
 
-from .config import MODELS_DIR, ROOT
-from .features import (
+from analysis.src.config import MODELS_DIR, ROOT
+from analysis.src.features import (
     build_timeonly_features_for_target,
     get_feature_columns_timeonly,
 )
