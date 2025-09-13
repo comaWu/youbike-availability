@@ -8,8 +8,7 @@ app = FastAPI()
 
 @app.get("/stations")
 def stations(city: str = Query(...)):
-    # TODO: 回傳你現有的站點清單（可先接到你現有的讀檔/DB 函式）
-    return server_fastapi.list_stations(city)  # 例：若你那邊有現成方法
+    return server_fastapi.list_stations(city)  
 
 @app.get("/predict_one")
 def predict_one(city: str, sno: str, target: str):
