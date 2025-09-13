@@ -1,8 +1,7 @@
 {
   "functions": { "api/**/*.py": { "runtime": "python3.11" } },
-  "routes": [
-    { "src": "^/api/(.*)$", "dest": "/api/index.py" },
-    { "src": "^(?!/api/).*", "dest": "/web/$1" }
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.py" }
   ],
   "buildCommand": "npm --prefix ./web ci && npm --prefix ./web run build",
   "outputDirectory": "web/dist"
