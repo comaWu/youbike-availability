@@ -55,13 +55,16 @@ def load_training_df() -> pd.DataFrame:
             sm.city,
             sm.sno,
             sm.ts AT TIME ZONE 'Asia/Taipei' AS ts_local,
-            CASE WHEN sm.available > 0 THEN 1 ELSE 0 END AS y
+            CASE WHEN sm.available > 0 THEN 1 ELSE 0 END AS y,
+            s.tot,
+            s.lat,
+            s.lng
         FROM station_minute sm
         JOIN station s ON s.city = sm.city AND s.sno = sm.sno
         WHERE sm.ts >= CAST(:start_ts AS timestamptz)
-          AND sm.ts <  CAST(:end_ts   AS timestamptz)
-          AND sm.is_active = TRUE
-          AND sm.city = COALESCE(CAST(:city AS text), sm.city)
+        AND sm.ts <  CAST(:end_ts   AS timestamptz)
+        AND sm.is_active = TRUE
+        AND sm.city = COALESCE(CAST(:city AS text), sm.city)
         ORDER BY sm.ts, sm.city, sm.sno
     """)
 
@@ -161,7 +164,12 @@ def main():
     # 2) 時間特徵
     log.info("[STEP] 建立時間特徵欄位")
     df = add_timeonly_features_for_training(df_raw)
-    feats = get_feature_columns_timeonly()
+    # 新增：站點特徵
+    for c in ["tot", "lat", "lng"]:
+        if c not in df.columns:
+            df[c] = 0
+    # 特徵欄位 = 時間特徵 + 站點特徵
+    feats = get_feature_columns_timeonly() + ["tot", "lat", "lng"]
     log.info(f"[OK] 特徵欄位：{feats}")
 
     X = df[feats].values
