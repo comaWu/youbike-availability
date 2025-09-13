@@ -3,7 +3,9 @@ import { MapContainer, TileLayer, CircleMarker, Popup, ScaleControl } from 'reac
 import 'leaflet/dist/leaflet.css'
 
 // 後端位址（vite：在 .env 內用 VITE_API_BASE_URL 設定；否則預設 localhost:8000）
-const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const API = import.meta.env.PROD
+  ? '' 
+  : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000')
 const CITY = 'TPE' // 目前以台北市為例，如要切換城市可改由 UI 控制
 
 // 產生 24 小時、每 5 分鐘一個選項
