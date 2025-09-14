@@ -1,0 +1,33 @@
+{
+  "samples": 2324166,
+  "train_samples": 1859332,
+  "valid_samples": 464834,
+  "features": [
+    "tgt_hour",
+    "tgt_dow",
+    "tgt_is_weekend",
+    "tgt_is_holiday",
+    "tgt_is_peak",
+    "tgt_is_night",
+    "tgt_is_lunch",
+    "tgt_hour_sin",
+    "tgt_hour_cos",
+    "tgt_dow_sin",
+    "tgt_dow_cos",
+    "tot",
+    "lat",
+    "lng"
+  ],
+  "metrics": {
+    "MAE": 4.8793417793927185,
+    "RMSE": 6.305712475932723,
+    "R2": 0.4938118770437002
+  },
+  "scatter_png": "E:\\AI\\Practice\\youbike-availability\\api\\assets\\models\\latest\\reg_scatter.png",
+  "dist_png": "E:\\AI\\Practice\\youbike-availability\\api\\assets\\models\\latest\\reg_dist.png",
+  "model_path": "E:\\AI\\Practice\\youbike-availability\\api\\assets\\models\\latest\\model_anytime_reg.pkl",
+  "feature_list_path": "E:\\AI\\Practice\\youbike-availability\\api\\assets\\models\\latest\\feature_columns_any_reg.json",
+  "train_city": "TPE",
+  "train_start": "2025-08-25 00:00",
+  "train_end": "2025-09-01 00:00"
+}

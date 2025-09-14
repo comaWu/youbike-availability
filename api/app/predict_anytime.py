@@ -8,8 +8,8 @@ import joblib
 import pandas as pd
 import numpy as np
 
-from analysis.src.config import MODELS_DIR, ROOT
-from analysis.src.features import (
+from .config import MODELS_DIR, ROOT
+from .features import (
     build_timeonly_features_for_target,
     get_feature_columns_timeonly,
 )
@@ -45,6 +45,17 @@ def _get_station(city: str, sno: str) -> dict | None:
     _ensure_station_index()
     return _st_idx.get(city, {}).get(str(sno)) if _st_idx else None
 
+
+def run_prediction_one(city: str, sno: str, target: str, assets_dir: str):
+    assets = Path(assets_dir)
+    model_path = assets / "models" / "latest" / f"{city}.joblib"  # 依你的檔名調整
+    model = joblib.load(model_path)
+
+    # X = build_features(city, sno, target)  # 若需要
+    # y_pred = model.predict_proba(X)[:, 1]
+    proba = 0.87  # 假資料，替換成你的邏輯
+    available = 3
+    return {"proba": proba, "available": available}
 # ---- 小工具 ----
 def _load_json(path: Path, fallback: Optional[list] = None):
     if path.exists():

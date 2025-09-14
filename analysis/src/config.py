@@ -13,7 +13,7 @@ load_dotenv(ROOT / ".env")
 # ---------------------------------------------------------
 # 路徑與輸出位置
 # ---------------------------------------------------------
-MODELS_DIR = ROOT / "analysis" / "models" / "latest"
+MODELS_DIR = ROOT / "api" / "assets" / "models" / "latest"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------

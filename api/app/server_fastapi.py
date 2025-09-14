@@ -10,7 +10,7 @@ from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from analysis.src.config import ROOT, MODELS_DIR
+from .config import ROOT, MODELS_DIR
 from .predict_anytime import predict_one_anytime
 
 # -----------------------------------------------------------------------------

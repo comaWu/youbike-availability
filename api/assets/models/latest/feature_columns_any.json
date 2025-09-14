@@ -1,0 +1,16 @@
+[
+  "tgt_hour",
+  "tgt_dow",
+  "tgt_is_weekend",
+  "tgt_is_holiday",
+  "tgt_is_peak",
+  "tgt_is_night",
+  "tgt_is_lunch",
+  "tgt_hour_sin",
+  "tgt_hour_cos",
+  "tgt_dow_sin",
+  "tgt_dow_cos",
+  "tot",
+  "lat",
+  "lng"
+]
