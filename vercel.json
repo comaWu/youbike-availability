@@ -1,8 +1,3 @@
 {
-  "functions": { "api/**/*.py": { "runtime": "python3.10" } }, 
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.py" }
-  ],
-  "buildCommand": "npm --prefix ./web ci && npm --prefix ./web run build",
-  "outputDirectory": "web/dist"
+  "functions": { "api/*.py": { "runtime": "python3.10" } }
 }
