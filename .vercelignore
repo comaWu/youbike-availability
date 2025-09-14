@@ -1,5 +1,0 @@
-web/
-analysis/            # 訓練碼與大型資料不打包到 API
-scripts/
-*.ipynb
-data
