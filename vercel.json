@@ -1,2 +1,5 @@
-{ "functions": { "api/*.py": { "runtime": "python3.10" } },
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index.py" }] }
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": { "api/*.py": { "runtime": "python3.10" } },
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index.py" }]
+}
