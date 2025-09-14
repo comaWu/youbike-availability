@@ -80,64 +80,6 @@ def build_timeonly_features_for_target(
     }
     return pd.DataFrame([row])
 
-# --------------------------------------------------------------------------- #
-#  B) 訓練用：給一個含有 ts_local & y 的 DataFrame，回加上時間特徵
-# --------------------------------------------------------------------------- #
-def add_timeonly_features_for_training(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    以向量化方式產生時間特徵；比逐列 map/apply 快很多。
-    需要欄位：ts_local（tz-aware 或可轉換字串）
-    """
-    out = df.copy()
-
-    # 1) 時區標準化（一次處理整欄）
-    ts = pd.to_datetime(out["ts_local"], errors="coerce")
-    if ts.isna().any():
-        raise ValueError(f"ts_local 有 {int(ts.isna().sum())} 筆無法轉時間")
-
-    try:
-        from zoneinfo import ZoneInfo
-        tz = ZoneInfo("Asia/Taipei")
-        ts = ts.dt.tz_localize(tz) if ts.dt.tz is None else ts.dt.tz_convert(tz)
-    except Exception:
-        tz = "Asia/Taipei"
-        ts = ts.dt.tz_localize(tz) if ts.dt.tz is None else ts.dt.tz_convert(tz)
-
-    # （小優化）去掉 tz，之後 .dt 學生產會略快、也省記憶體
-    ts_naive = ts.dt.tz_convert(tz).dt.tz_localize(None)
-
-    # 2) 向量化抽取欄位
-    hour = ts_naive.dt.hour
-    dow  = ts_naive.dt.dayofweek  # 0=Mon, 6=Sun
-
-    # 3) 向量化旗標
-    is_weekend = dow.isin([5, 6]).astype("int8")
-    is_holiday = pd.Series(0, index=out.index, dtype="int8")  # 若要國定假日，這裡再補
-
-    is_peak  = hour.isin([7,8,9,17,18,19]).astype("int8")
-    is_night = ((hour >= 23) | (hour < 6)).astype("int8")
-    is_lunch = hour.isin([12,13]).astype("int8")
-
-    # 4) 向量化 sin/cos
-    import numpy as np
-    hr_rad  = 2 * np.pi * hour.to_numpy() / 24.0
-    dow_rad = 2 * np.pi * dow.to_numpy()  / 7.0
-
-    out["tgt_hour"]        = hour.astype("int8")
-    out["tgt_dow"]         = dow.astype("int8")
-    out["tgt_is_weekend"]  = is_weekend
-    out["tgt_is_holiday"]  = is_holiday
-    out["tgt_is_peak"]     = is_peak
-    out["tgt_is_night"]    = is_night
-    out["tgt_is_lunch"]    = is_lunch
-    out["tgt_hour_sin"]    = np.sin(hr_rad).astype("float32")
-    out["tgt_hour_cos"]    = np.cos(hr_rad).astype("float32")
-    out["tgt_dow_sin"]     = np.sin(dow_rad).astype("float32")
-    out["tgt_dow_cos"]     = np.cos(dow_rad).astype("float32")
-
-    # 回存（保留原欄位；ts_local 換成 tz-aware 也可，這裡留原樣）
-    out["ts_local"] = ts
-    return out
 
 # 便利函式：取訓練用的特徵欄位清單
 def get_feature_columns_timeonly() -> list[str]:
