@@ -1,0 +1,1 @@
+from app.server_fastapi import app 
